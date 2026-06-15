@@ -1,0 +1,50 @@
+group 'dev.isar.isar_flutter_libs'
+version '1.0-SNAPSHOT'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Mendukung Gradle modern Anda
+        classpath 'com.android.tools.build:gradle:8.11.1'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    // 1. SUNTIK NAMESPACE AGAR AMAN DI GRADLE 8+
+    namespace "dev.isar.isar_flutter_libs"
+    
+    compileSdkVersion 35
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 35
+    }
+    
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+}
+
+// 2. STRATEGI RESOLUSI: Paksa dependensi internal Isar memakai androidx.core modern (Bebas lStar)
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.core:core:1.13.1'
+        force 'androidx.core:core-ktx:1.13.1'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+}

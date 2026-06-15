@@ -1,0 +1,64 @@
+name: smart_parking_app1
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # State Management & Navigasi
+  flutter_bloc: ^9.1.1
+  go_router: ^17.3.0
+
+  # IoT
+  mqtt_client: ^10.11.1
+
+  # DATABASE LOKAL: Menggunakan Git resmi Isar-Community cabang versi 3
+  # DATABASE LOKAL: Mengarah ke folder lokal yang build.gradle-nya sudah kita kunci
+  isar: ^3.1.0+1
+  isar_flutter_libs:
+    path: ./packages/isar_flutter_libs
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+  # Generator Isar Resmi
+  isar_generator: ^3.1.0+1
+  build_runner: ^2.4.13
+
+  # [TAMBAHAN BARU]: Paket untuk kustomisasi Ikon dan Splash Screen
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+# [TAMBAHAN BARU]: Konfigurasi Ikon Aplikasi
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_icon.png" # <--- Pastikan Anda menaruh file ikon berformat .png di folder ini
+
+# [TAMBAHAN BARU]: Konfigurasi Layar Splash (Warna Pink/Maroon sesuai tema Anda)
+flutter_native_splash:
+  color: "#FE6694"
+  image: "assets/images/app_icon.png"
+  android_12:
+    image: "assets/images/app_icon.png"
+    icon_background_color: "#FE6694"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/bg_parking.png
+    # [TAMBAHAN BARU]: Mendaftarkan aset ikon agar bisa dibaca oleh sistem
+    - assets/images/app_icon.png

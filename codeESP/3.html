@@ -1,0 +1,174 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const char* ssid = "opik";
+const char* password = "11111111";
+const char* mqtt_server = "test.mosquitto.org"; 
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
+// PIN INDIKATOR LED DAN BUZZER
+#define PIN_LED_STATUS 27  
+#define PIN_BUZZER 26      // <-- Buzzer sekarang di Pin 26 sesuai permintaan
+
+int sisaSlot = 10;
+unsigned long waktuPesanEror = 0;
+bool sedangMenampilkanEror = false;
+
+void tampilkanSisaSlot() {
+  if (!sedangMenampilkanEror) {
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print(" SMART PARKING ");
+    lcd.setCursor(0, 1); lcd.print("Sisa Slot: " + String(sisaSlot) + " /10");
+  }
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String msg = "";
+  for (int i = 0; i < length; i++) msg += (char)payload[i];
+  String topicStr = String(topic);
+
+  if (topicStr == "opik/parking/status_slot") {
+    sisaSlot = msg.toInt();
+    tampilkanSisaSlot();
+  }
+  
+  else if (topicStr == "opik/parking/masuk") {
+    if (msg == "MOBIL_DEKAT") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("MASUK: ADA MOBIL");
+      lcd.setCursor(0, 1); lcd.print("SCAN RFID MASUK ");
+    } 
+    else if (msg == "REQ_MASUK") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("MASUK BERHASIL!");
+      lcd.setCursor(0, 1); lcd.print("PALANG TERBUKA  ");
+      
+      // LED & Buzzer Sukses: Berkedip/Berbunyi cepat 2x
+      digitalWrite(PIN_LED_STATUS, HIGH); digitalWrite(PIN_BUZZER, HIGH); delay(100); 
+      digitalWrite(PIN_LED_STATUS, LOW);  digitalWrite(PIN_BUZZER, LOW);  delay(100);
+      digitalWrite(PIN_LED_STATUS, HIGH); digitalWrite(PIN_BUZZER, HIGH); delay(100); 
+      digitalWrite(PIN_LED_STATUS, LOW);  digitalWrite(PIN_BUZZER, LOW);
+    }
+    else if (msg == "REQ_TUTUP") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("MOBIL MASUK...  ");
+      lcd.setCursor(0, 1); lcd.print("MENUTUP PALANG  ");
+    }
+    else if (msg == "REQ_PENUH" || msg == "REQ_REJECT" || msg == "ACC_REJECT") { 
+      sedangMenampilkanEror = true;
+      waktuPesanEror = millis(); 
+      
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("AKSES DITOLAK!  ");
+      if (msg == "REQ_PENUH") {
+        lcd.setCursor(0, 1); lcd.print("PARKIRAN FULL !!");
+      } else {
+        lcd.setCursor(0, 1); lcd.print("KARTU BELUM REG ");
+      }
+      
+      // LED & Buzzer Eror: Menyala/Berbunyi diam tanpa kedip
+      digitalWrite(PIN_LED_STATUS, HIGH);
+      digitalWrite(PIN_BUZZER, HIGH);
+    }
+    else if (msg == "REQ_SELESAI") {
+      sedangMenampilkanEror = false;
+      digitalWrite(PIN_LED_STATUS, LOW);
+      digitalWrite(PIN_BUZZER, LOW);
+      tampilkanSisaSlot();
+    }
+  }
+
+  else if (topicStr == "opik/parking/keluar") {
+    if (msg == "MOBIL_DEKAT_KELUAR") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("KELUAR:ADA MOBIL");
+      lcd.setCursor(0, 1); lcd.print("SCAN RFID KELUAR");
+    }
+    else if (msg == "REQ_KELUAR_ACC") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("KELUAR BERHASIL!");
+      lcd.setCursor(0, 1); lcd.print("SILAKAN KELUAR  ");
+      
+      // LED & Buzzer Sukses: Berkedip/Berbunyi cepat 2x
+      digitalWrite(PIN_LED_STATUS, HIGH); digitalWrite(PIN_BUZZER, HIGH); delay(100); 
+      digitalWrite(PIN_LED_STATUS, LOW);  digitalWrite(PIN_BUZZER, LOW);  delay(100);
+      digitalWrite(PIN_LED_STATUS, HIGH); digitalWrite(PIN_BUZZER, HIGH); delay(100); 
+      digitalWrite(PIN_LED_STATUS, LOW);  digitalWrite(PIN_BUZZER, LOW);
+    }
+    else if (msg == "REQ_KELUAR_REJECT") {
+      sedangMenampilkanEror = true;
+      waktuPesanEror = millis();
+      
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("KARTU INVALID!  ");
+      lcd.setCursor(0, 1); lcd.print("BELUM SCAN MASUK");
+      
+      // LED & Buzzer Eror: Menyala/Berbunyi diam tanpa kedip
+      digitalWrite(PIN_LED_STATUS, HIGH); 
+      digitalWrite(PIN_BUZZER, HIGH); 
+    }
+    else if (msg == "REQ_KELUAR_TUTUP") {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("MOBIL KELUAR... ");
+      lcd.setCursor(0, 1); lcd.print("MENUTUP PALANG  ");
+    }
+    else if (msg == "REQ_KELUAR_SELESAI") {
+      sedangMenampilkanEror = false;
+      digitalWrite(PIN_LED_STATUS, LOW);
+      digitalWrite(PIN_BUZZER, LOW);
+      tampilkanSisaSlot();
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_LED_STATUS, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT); 
+  
+  digitalWrite(PIN_LED_STATUS, LOW);
+  digitalWrite(PIN_BUZZER, LOW);
+
+  lcd.init(); 
+  lcd.backlight();
+  lcd.print("Mencari WiFi...");
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+  
+  Serial.println("WiFi Terhubung (ESP Display Monitor)!");
+  client.setServer(mqtt_server, 1883); 
+  client.setCallback(callback);
+  tampilkanSisaSlot();
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    String clientId = "Wemos_DisplayMonitor_" + String(random(0, 9999));
+    if (client.connect(clientId.c_str())) {
+      client.subscribe("opik/parking/masuk");
+      client.subscribe("opik/parking/keluar");
+      client.subscribe("opik/parking/status_slot");
+      Serial.println("MQTT Display Terhubung ke Mosquitto!");
+    } else { delay(2000); }
+  }
+}
+
+void loop() {
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  // Reset eror setelah 2 detik
+  if (sedangMenampilkanEror && (millis() - waktuPesanEror > 2000)) {
+    sedangMenampilkanEror = false;
+    digitalWrite(PIN_LED_STATUS, LOW); 
+    digitalWrite(PIN_BUZZER, LOW); 
+    tampilkanSisaSlot();
+  }
+  delay(10);
+}

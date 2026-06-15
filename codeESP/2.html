@@ -1,0 +1,142 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <MFRC522.h>
+#include <SPI.h>
+#include <ESP32Servo.h>
+
+const char* ssid = "opik";
+const char* password = "11111111";
+const char* mqtt_server = "test.mosquitto.org"; 
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+Servo palangKeluar;
+
+// PIN CONFIGURATION REVISI TOTAL BERDASARKAN FOTO WEMOS D1 R32
+#define SS_PIN        5   // Tetap di GPIO5 (MISO header)
+#define RST_PIN       22  // Hubungkan ke lubang sablon RST (GPIO22)
+#define PIN_TRIG_OUT  16  // Hubungkan ke lubang sablon GPIO16
+#define PIN_ECHO_OUT  17  // Hubungkan ke lubang sablon GPIO17
+#define PIN_SERVO_OUT 14   // Hubungkan ke lubang sablon GPIO4
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+bool mobilMenungguKeluar = false;
+bool mobilSudahKeluar = false;
+bool statusTerdeteksiKeluar = false;
+bool menungguValidasiKeluar = false;
+
+long bacaJarakOut() {
+  digitalWrite(PIN_TRIG_OUT, LOW); delayMicroseconds(2);
+  digitalWrite(PIN_TRIG_OUT, HIGH); delayMicroseconds(10);
+  digitalWrite(PIN_TRIG_OUT, LOW);
+  long durasi = pulseIn(PIN_ECHO_OUT, HIGH, 20000);
+  long jarak = durasi * 0.034 / 2;
+  return (jarak == 0) ? 999 : jarak;
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) message += (char)payload[i];
+  String topicStr = String(topic);
+
+  if (topicStr == "opik/parking/respon_keluar") {
+    if (menungguValidasiKeluar) {
+      if (message == "ACC_BUKA_KELUAR") {
+        Serial.println("-> Akses Keluar Diterima! Membuka Palang Keluar...");
+        palangKeluar.write(0); 
+        mobilMenungguKeluar = true;
+        mobilSudahKeluar = false;
+        menungguValidasiKeluar = false;
+        delay(500);
+      }
+      else if (message == "ACC_REJECT_KELUAR") {
+        Serial.println("-> Akses Keluar Ditolak!");
+        delay(1000);
+        client.publish("opik/parking/keluar", "REQ_KELUAR_SELESAI");
+        menungguValidasiKeluar = false;
+        statusTerdeteksiKeluar = false;
+      }
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  SPI.begin();
+  mfrc522.PCD_Init();
+  pinMode(PIN_TRIG_OUT, OUTPUT); pinMode(PIN_ECHO_OUT, INPUT);
+  
+  ESP32PWM::allocateTimer(1); 
+  palangKeluar.attach(PIN_SERVO_OUT, 500, 2400);
+  palangKeluar.write(90); 
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\nWiFi Terhubung (ESP Keluar)!");
+  
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    String clientId = "Wemos_GateOut_Opik_" + String(random(0, 9999));
+    if (client.connect(clientId.c_str())) {
+      client.subscribe("opik/parking/respon_keluar");
+      Serial.println("MQTT Keluar Terhubung ke Mosquitto!");
+    } else { delay(2000); }
+  }
+}
+
+void loop() {
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  long jarak = bacaJarakOut();
+
+  if (!mobilMenungguKeluar && !menungguValidasiKeluar && jarak < 15) {
+    if (!statusTerdeteksiKeluar) {
+      client.publish("opik/parking/keluar", "MOBIL_DEKAT_KELUAR");
+      statusTerdeteksiKeluar = true;
+      Serial.println("-> Mobil mendekati gerbang keluar, silakan scan RFID...");
+    }
+
+    delay(50); 
+
+    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+      String uidString = "";
+      for (byte i = 0; i < mfrc522.uid.size; i++) {
+        uidString += String(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
+        uidString += String(mfrc522.uid.uidByte[i], HEX);
+      }
+      uidString.toUpperCase();
+      Serial.print("-> UID Keluar Terbaca: "); Serial.println(uidString);
+      
+      client.publish("opik/parking/uid_keluar", uidString.c_str());
+      menungguValidasiKeluar = true;
+      
+      mfrc522.PICC_HaltA(); mfrc522.PCD_StopCrypto1();
+    }
+  }
+  else if (!mobilMenungguKeluar && !menungguValidasiKeluar && jarak >= 15 && statusTerdeteksiKeluar) {
+    client.publish("opik/parking/keluar", "REQ_KELUAR_SELESAI");
+    statusTerdeteksiKeluar = false;
+  }
+
+  if (mobilMenungguKeluar) {
+    if (jarak < 15) { mobilSudahKeluar = true; }
+    if (mobilSudahKeluar && jarak > 20 && jarak != 999) {
+      delay(800);
+      if (bacaJarakOut() > 20) {
+        Serial.println("-> Mobil keluar aman. Menutup palang keluar.");
+        client.publish("opik/parking/keluar", "REQ_KELUAR_TUTUP");
+        palangKeluar.write(90); 
+        delay(1500);
+        mobilMenungguKeluar = false; mobilSudahKeluar = false; statusTerdeteksiKeluar = false;
+        client.publish("opik/parking/keluar", "REQ_KELUAR_SELESAI");
+      }
+    }
+  }
+  delay(50);
+}
